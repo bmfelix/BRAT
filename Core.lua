@@ -80,6 +80,13 @@ function BRAT.IsReadySoon(spellID, window)
     return (start + dur - GetTime()) <= window
 end
 
+-- Never recommend this spell (spec rules: never), under any of its IDs.
+function BRAT.Never(spellID)
+    local n = spellID and BRAT.Rules().never
+    if not n then return false end
+    return n[spellID] or n[BRAT.Cooldowns:Key(spellID)] or false
+end
+
 -- Is this a spell the player actually has? (Logs data can include talents you skipped.)
 function BRAT.Knows(spellID)
     local known = BRAT.Safe(IsPlayerSpell, spellID)
@@ -92,6 +99,10 @@ end
 -- threat (secret value), it counts, as before.
 function BRAT.FightingMe(unit)
     if BRAT.Safe(UnitIsUnit, unit, "target") then return true end
+    -- Training dummies keep no threat list: one in combat counts (else a pack of
+    -- dummies reads as 1 target).
+    local name = BRAT.Safe(UnitName, unit)
+    if type(name) == "string" and name:lower():find("dummy", 1, true) then return true end
     local ok, threat = pcall(UnitThreatSituation, "player", unit)
     if not ok or BRAT.IsSecret(threat) then return true end
     return threat ~= nil
@@ -218,6 +229,21 @@ function BRAT.Essence()
     return cur, max
 end
 
+-- Essence you'll have `seconds` from now: current + progress on the next one
+-- + regen (1 per 5s, faster with haste), whole points, at most max. Parts the
+-- game hides are left out (never more optimistic than the plain count).
+function BRAT.EssenceIn(seconds)
+    local cur, max = BRAT.Essence()
+    if not cur then return nil end
+    local partial = BRAT.Safe(UnitPartialPower, "player", ESSENCE)
+    local inactive, active = BRAT.Safe(GetPowerRegenForPowerType, ESSENCE) -- per second
+    local regen = math.max(tonumber(inactive) or 0, tonumber(active) or 0)
+    local e = cur
+    if type(partial) == "number" then e = e + partial / 1000 end
+    e = e + regen * (seconds or 0)
+    return math.min(max, math.floor(e + 0.05)), max
+end
+
 -- Essence cost of a spell right now (talents like Imminent Destruction lower
 -- it), or `default` if the game won't say.
 function BRAT.EssenceCost(spellID, default)
@@ -312,7 +338,9 @@ f:SetScript("OnEvent", function(_, event, arg1, _, arg3)
         if not BRAT.db.source then StaticPopup_Show("BRAT_CHOOSE_SOURCE") end
         C_Timer.After(5, function() BRAT.Check:LoginNotice() end)
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" and arg1 == "player" then
-        if not BRAT.IsSecret(arg3) then
+        -- Automatic casts that aren't button presses (Evoker: Charged Blast, four
+        -- per Disintegrate tick) would pass for "the spell you just cast".
+        if not BRAT.IsSecret(arg3) and not (BRAT.Rules().ignoreCasts or {})[arg3] then
             BRAT.History:OnCast(arg3) -- before anything changes what's shown
             BRAT.Cooldowns:OnCast(arg3)
             BRAT.Predict:OnPlayerCast(arg3)

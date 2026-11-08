@@ -18,6 +18,10 @@
 --   stationary [spellID] = true: can't be cast while moving although the game
 --              reports no cast time (channels, empowered spells).
 --   moveBuff   spellID of a buff that lets you cast while moving (Evoker: Hover).
+--   noCooldown [spellID] = true: has no cooldown, whatever the game reports.
+--   why        function(say): extra lines for /brat why (the facts a rule uses).
+--   ignoreCasts [spellID] = true: automatic "casts" that aren't button presses
+--              (Evoker: Charged Blast); BRAT doesn't treat them as your cast.
 --   empower    [spellID] = function(targets) -> empower level to release at,
 --              shown on the icon as "R1".."R4".
 -- Order functions may return nil: "no opinion right now" (e.g. Essence is
@@ -176,8 +180,11 @@ do
     local SPENDERS = { [DISINTEGRATE] = true, [PYRE] = true }
     local function spend(id, free, main)
         if free then return main and 0.86 or 0.40 end
-        local e, max = BRAT.Essence()
-        if not e then return nil end
+        -- Essence by the time this would be cast (regen while NOW is cast).
+        local e, max = BRAT.EssenceIn(BRAT.Predict.window or 0)
+        -- Essence hidden: when to spend is learned, but which spender stays
+        -- decided here (the wrong one for the enemy count sits below the fillers).
+        if not e then return (not main) and 0.10 or nil end
         -- NOW is a spender you haven't cast yet: its Essence is about to go
         -- (unless Essence Burst pays for it).
         local before = BRAT.Predict:Unspent()
@@ -195,8 +202,27 @@ do
             .. "Disintegrate (5+ targets: Disintegrate when Mass Disintegrate is ready, else Pyre; "
             .. "Flameshaper: Pyre at 3+; Essence Burst first) > "
             .. "Azure Sweep > Living Flame (Burnout = instant) > Azure Strike (moving). "
-            .. "Dragonrage, Tip the Scales and Twin Flame are learned.",
+            .. "Dragonrage on cooldown. Tip the Scales and Twin Flame follow the Warcraft Logs rotation.",
+        -- /brat why: the facts behind the Disintegrate / Pyre choice.
+        why = function(say)
+            local e, max = BRAT.Essence()
+            local n = BRAT.Predict.enemies or 1
+            say(("  Essence: %s. Enemies counted: %d (Pyre from %d, %s). Mass Disintegrate charges: %d -> %s."):format(
+                e and ("%d / %d"):format(e, max) or "hidden by the game (when to spend is learned)",
+                n, pyreAt(), scalecommander() and "Scalecommander" or "Flameshaper",
+                massReady, disintegrateMain() and "Disintegrate" or "Pyre"))
+        end,
+        -- No cooldown, whatever the game reports while you wait for Essence
+        -- (BRAT had learned a 13s "cooldown" on both).
+        noCooldown = { [DISINTEGRATE] = true, [PYRE] = true, [LIVING_FLAME] = true, [AZURE_STRIKE] = true },
+        -- Never recommended, even when Blizzard's assistant picks them: Tail Swipe,
+        -- Wing Buffet (knockbacks, not damage buttons).
+        never = { [368970] = true, [357214] = true },
+        -- Charged Blast (370454): automatic, four casts per Disintegrate tick. Not a button.
+        ignoreCasts = { [370454] = true },
         order = {
+            -- Dragonrage: on cooldown (Icy Veins 12.1.5: the spec's one major cooldown, 2 min).
+            [375087] = function() return 0.95 end,
             [DEEP_BREATH_SC] = function() return 0.96 end,
             [DEEP_BREATH] = function() return 0.96 end,
             [FIRE_BREATH_FOM] = function() return 0.92 end,
@@ -233,7 +259,7 @@ do
         lengths = {
             [FIRE_BREATH] = 30, [FIRE_BREATH_FOM] = 30,
             [ETERNITY_SURGE] = 30, [ETERNITY_SURGE_FOM] = 30,  -- 27s with Event Horizon (read from the game)
-            [DEEP_BREATH] = 120, [DEEP_BREATH_SC] = 120,
+            [DEEP_BREATH] = 60, [DEEP_BREATH_SC] = 60,  -- 60s read from the game (Brad's Evoker, 12.1.5)
             [375087] = 120,  -- Dragonrage
             [370553] = 120,  -- Tip the Scales
             [363916] = 90, [374348] = 90,      -- Obsidian Scales, Renewing Blaze

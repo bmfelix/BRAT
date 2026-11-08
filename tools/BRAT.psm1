@@ -23,7 +23,7 @@ function Get-BratSpecs {
         # (Hover alone ~20x a fight). Not DamageOnly: Dragonrage and Tip the Scales deal no damage themselves.
         [pscustomobject]@{ Id = 1467; Class = "Evoker"; Spec = "Devastation"; Metric = "dps"; DamageOnly = $false
             Ignore = @(358267, 358733, 363916, 374348, 374968, 374227, 370665, 360995, 361195, 361509, 355913, # Hover, Glide, Obsidian Scales, Renewing Blaze, Time Spiral, Zephyr, Rescue, Verdant Embrace x2, Living Flame (heal), Emerald Blossom
-                       365585, 374251, 351338, 364342, 406732, 357214, 358385, 390386, 1236616, 1236998) } # Expunge, Cauterizing Flame, Quell, Blessing of the Bronze, Spatial Paradox, Wing Buffet, Landslide, Fury of the Aspects, Light's Potential, Draught of Rampant Abandon
+                       365585, 374251, 351338, 364342, 406732, 357214, 358385, 390386, 1236616, 1236998, 370454) } # Charged Blast (auto), Expunge, Cauterizing Flame, Quell, Blessing of the Bronze, Spatial Paradox, Wing Buffet, Landslide, Fury of the Aspects, Light's Potential, Draught of Rampant Abandon
     )
 }
 
