@@ -1,0 +1,25 @@
+## Interface: 120105, 120100
+## Title: BRAT - Brad's Rotation Assistant Technology
+## Notes: Shows the spell to press now and next, from Warcraft Logs top players or Blizzard's assistant.
+## Author: Brad
+## Version: 0.1.0
+## SavedVariables: BRATDB
+
+Core.lua
+Data\SpecRules.lua
+Data\WCLRaw.lua
+Data\MyParses.lua
+RotationBuilder.lua
+Context.lua
+Cooldowns.lua
+Learn.lua
+Sources.lua
+Procs.lua
+Priority.lua
+History.lua
+Report.lua
+Predict.lua
+Stats.lua
+Display.lua
+Options.lua
+Check.lua
