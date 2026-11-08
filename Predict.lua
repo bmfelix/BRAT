@@ -24,7 +24,7 @@ local function rotationSet()
     -- suggested on its own.
     local set = {}
     for _, id in ipairs(list) do
-        if not BRAT.IsSecret(id) then set[BRAT.Cooldowns:Key(id)] = true end
+        if not BRAT.IsSecret(id) and not BRAT.Never(id) then set[BRAT.Cooldowns:Key(id)] = true end
     end
     return set
 end
@@ -37,6 +37,9 @@ function Predict:GetBlizzardPick()
     if not C_AssistedCombat then return nil end
     local id = BRAT.Safe(C_AssistedCombat.GetNextCastSpell, false)
     if not id or id == 0 then return nil end
+    -- Spells the spec rules filter out (Evoker: Tail Swipe) are never shown,
+    -- even when Blizzard's assistant picks them.
+    if BRAT.Never(id) then return nil end
     -- GetActionSpell is the "one button" proxy spell, never a real pick.
     local proxy = BRAT.Safe(C_AssistedCombat.GetActionSpell)
     if proxy and id == proxy then return nil end
@@ -256,22 +259,44 @@ local function bucketShares(data, targets)
             for id, n in pairs(tos) do totals[id] = (totals[id] or 0) + n; sum = sum + n end
         end
     end
-    for id, n in pairs(totals) do totals[id] = n / math.max(sum, 1) end
-    return totals
+    local out = {}
+    for id, n in pairs(totals) do
+        local s = n / math.max(sum, 1)
+        out[id] = (out[id] or 0) + s
+        -- Also under the ID you cast it as now (logs may hold another ID of the spell).
+        local k = BRAT.Cooldowns:Key(id)
+        if k ~= id then out[k] = (out[k] or 0) + s end
+    end
+    return out
+end
+
+-- While you're casting (or in the global cooldown right after a cast) the game
+-- can report every spell as unusable / locked: Evoker empowers do this the
+-- whole time you hold them and a moment after. That's the cast, not the spell,
+-- so then "usable" isn't trusted and readiness comes from BRAT's own cooldown
+-- timers (fillers with no cooldown are ready).
+local castingNow -- defined below
+local function locked()
+    return castingNow() ~= nil or GetTime() - (Predict.lastCastAt or 0) < BRAT.GCD()
+end
+local function usable(id) return BRAT.IsUsable(id) or locked() end
+local function readySoon(id, window)
+    if BRAT.IsReadySoon(id, window) then return true end
+    return locked() and BRAT.Cooldowns:Remaining(id) <= window
 end
 
 local function candidateOK(id, current)
-    if not id then return false end
+    if not id or BRAT.Never(id) then return false end
     if Predict:IsFree(id, current) then
         -- A proc: ready even if its cooldown timer says otherwise.
-        return BRAT.IsUsable(id) and not BRAT.HasOwnBuff(id)
+        return usable(id) and not BRAT.HasOwnBuff(id)
     end
     -- A spell can't normally follow itself (casting it starts its cooldown),
     -- unless that cast is free: a free Empyreal Holy Fire leaves the cooldown
     -- alone, so a normal Holy Fire can still come right after it.
     local castFree = (id == current or (castBefore and castBefore[id])) and Predict:FreeLeft(id) > 0
     local repeatOK = canRepeat(id) or castFree
-    return (id ~= current or repeatOK) and BRAT.IsUsable(id) and BRAT.IsReadySoon(id, readyWindow(current))
+    return (id ~= current or repeatOK) and usable(id) and readySoon(id, readyWindow(current))
         and not BRAT.HasOwnBuff(id)
         and not (castBefore and castBefore[id] and not repeatOK)
 end
@@ -304,6 +329,7 @@ end
 function Predict:GetNext(current, sourceOverride)
     if not current then return nil end
     self.after = current -- spec rules can ask what's cast before this prediction (Predict:Unspent)
+    self.window = readyWindow(current) -- ...and how long until it's cast (Evoker: Essence regen)
     local spec = BRAT.GetSpecID()
     local targets = self.targets or 1
 
@@ -339,10 +365,15 @@ function Predict:GetNext(current, sourceOverride)
         local cands = {}
         for id in pairs(rotSet or {}) do cands[id] = true end
         for id in pairs(merged) do if kind ~= "logs" or not rotSet or rotSet[id] then cands[id] = true end end
+        -- Warcraft Logs mode: how often top players cast each spell at this enemy
+        -- count. A spell the guide doesn't rank and they never cast here (Evoker:
+        -- Tail Swipe) isn't suggested at all.
+        local overall = kind == "logs" and bucketShares(logs, targets) or nil
         local bestId, bestScore
         local moving = BRAT.IsMoving()
         for id in pairs(cands) do
             local p, games = BRAT.Priority:Score(id, targets, (self:IsFree(id, current)))
+            if p and overall and games >= 0 and not overall[id] then p = nil end
             if p and candidateOK(id, current) then
                 local share = (merged[id] or 0) / math.max(total, 1)
                 local habit = 0
@@ -474,7 +505,8 @@ function Predict:GetQueue()
     end
     -- In and out of combat: before a pull BRAT reads the real cooldowns, so its
     -- pick (the opener) is at its most reliable then.
-    if useMine then
+    -- Also when Blizzard's pick was filtered out (spec rules: never): BRAT's own pick.
+    if useMine or (not first and UnitAffectingCombat("player")) then
         local mine = self:BestNow()
         if mine then first, self.nowFrom = mine, "brat" end
     end
@@ -500,7 +532,7 @@ function Predict:GetQueue()
 end
 
 -- The spell you're casting right now (cast or channel), or nil.
-local function castingNow()
+function castingNow() -- the local declared above candidateOK
     for _, fn in ipairs({ UnitCastingInfo, UnitChannelInfo }) do
         local ok, name, _, _, _, _, _, _, a8, a9 = pcall(fn, "player")
         if ok and name and not BRAT.IsSecret(name) then
@@ -535,7 +567,7 @@ function Predict:BestNow()
         after = self.lastCastSpell
     end
     if after then return (self:GetNext(after)) end
-    self.after = nil -- idle: nothing is cast before this pick
+    self.after, self.window = nil, 0 -- idle: nothing is cast before this pick
 
     local tg = self.targets or 1
     local moving = BRAT.IsMoving()
@@ -549,10 +581,15 @@ function Predict:BestNow()
             local score, games = BRAT.Priority:Score(id, tg, free)
             -- Spells the guide doesn't rank: Warcraft Logs mode uses the Warcraft
             -- Logs shares; Blizzard mode uses the priority from the Blizzard rotation.
-            if games >= 0 and logsMode then score = logsScore(shares[id]) end
-            if moving and BRAT.MustStand(id, free) then score = score - 1 end
-            if BRAT.Cooldowns:AboutToCap(id, 0.25) then score = score + 0.3 end
-            if not bestScore or score > bestScore then bestId, bestScore = id, score end
+            if games >= 0 and logsMode then
+                -- Never cast by top players at this enemy count: not suggested.
+                score = shares[id] and logsScore(shares[id]) or nil
+            end
+            if score then
+                if moving and BRAT.MustStand(id, free) then score = score - 1 end
+                if BRAT.Cooldowns:AboutToCap(id, 0.25) then score = score + 0.3 end
+                if not bestScore or score > bestScore then bestId, bestScore = id, score end
+            end
         end
     end
     return bestId
@@ -569,7 +606,7 @@ function Predict:ComingUp(shown, lookahead, max)
     local skip = {}
     for _, id in pairs(shown) do if id then skip[BRAT.Cooldowns:Key(id)] = true end end
     for _, e in ipairs(BRAT.Cooldowns:Upcoming(readyWindow(current) + lookahead)) do
-        if not skip[e.id] and BRAT.Knows(e.id) and not self:IsFree(e.id, current) then
+        if not skip[e.id] and not BRAT.Never(e.id) and BRAT.Knows(e.id) and not self:IsFree(e.id, current) then
             out[#out + 1] = e
             if #out >= (max or 3) then break end
         end
@@ -648,10 +685,8 @@ function Predict:Why(say)
     say("  Cooldown reductions in use: " .. (#reds > 0 and table.concat(reds, "; ") or "none yet"))
     local ch = BRAT.db.cds[BRAT.Cooldowns:Key(88625)]
     if ch and ch.charges then say(("  Holy Word: Chastise charges: %d"):format(ch.charges)) end
-    if select(2, UnitClass("player")) == "EVOKER" then
-        local e, emax = BRAT.Essence()
-        say("  Essence: " .. (e and ("%d / %d"):format(e, emax) or "hidden by the game (spenders are learned from Blizzard)"))
-    end
+    -- Spec-specific facts (Data\SpecRules.lua: why), e.g. Evoker Essence / Pyre choice.
+    if BRAT.Rules().why then BRAT.Rules().why(say) end
     -- Cooldown length BRAT uses for each rotation spell (compare with the tooltips).
     local lens = {}
     for id in pairs(rotationSet() or {}) do

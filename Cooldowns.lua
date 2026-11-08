@@ -101,9 +101,14 @@ local function info(id)
     return cds[id]
 end
 
+-- Spells the spec rules say have no cooldown (Evoker: Disintegrate, Pyre). The
+-- game can report a "cooldown" on them (waiting for Essence) that isn't one.
+local function noCooldown(id) return rules().noCooldown and rules().noCooldown[id] end
+
 -- Remember the real cooldown/charges whenever the game lets us read them.
 function CD:LearnFromGame(raw)
     local id = key(raw)
+    if noCooldown(id) then return end
     local cd = BRAT.Safe(C_Spell.GetSpellCooldown, raw)
     if cd and not BRAT.IsSecret(cd.duration) and not BRAT.IsSecret(cd.isOnGCD)
         and not cd.isOnGCD and cd.duration and cd.duration > GCD_MAX then
@@ -121,6 +126,7 @@ end
 -- Full cooldown length in seconds (nil = no real cooldown, i.e. a filler).
 function CD:Length(id)
     id = key(id)
+    if noCooldown(id) then return nil end
     local i = BRAT.db.cds[id]
     if i and i.len then return i.len end
     local ms = BRAT.Safe(GetSpellBaseCooldown, id)
@@ -266,6 +272,15 @@ function CD:OnPicked(id)
     local now = GetTime()
     if pending[id] then
         info(id).picks = (info(id).picks or 0) + 1
+        -- Spells whose reductions the spec rules fully describe: the timer is
+        -- trusted. Blizzard can briefly recommend a spell still on cooldown
+        -- (e.g. Fire Breath at the pull, right after the opener cast it), so a
+        -- pick only counts when the timer is nearly done anyway.
+        local p = pending[id]
+        if knownRed(id) and p.q[1] then
+            local len = CD:Length(id) or 0
+            if frontLeft(id, p, now) > math.max(2, len * 0.1) then return end
+        end
         proveReady(id, now)
     elseif self:Length(id) then
         info(id).picks = (info(id).picks or 0) + 1
@@ -314,6 +329,10 @@ function CD:Describe(limit)
     local spells = {}
     for x, i in pairs(BRAT.db.cds) do if i.red and next(i.red) then spells[x] = i end end
     for x in pairs(rules().reductions) do spells[x] = BRAT.db.cds[x] or {} end
+    -- Only spells you have, once each (a spell can be listed under two IDs).
+    for x in pairs(spells) do
+        if key(x) ~= x or not BRAT.Knows(x) then spells[x] = nil end
+    end
     for x, i in pairs(spells) do
         local ys = {}
         for y in pairs(i.red or {}) do ys[y] = true end
