@@ -20,7 +20,7 @@ local function say(msg) print("|cff66ccffBRAT|r: " .. msg) end
 -- Which source is active (A/B test can override the chosen one per fight)
 ---------------------------------------------------------------------------
 function BRAT.ActiveSource()
-    return Stats.abSource or BRAT.db.source or "blizzard"
+    return Stats.abSource or BRAT.db.source or "logs"
 end
 
 ---------------------------------------------------------------------------

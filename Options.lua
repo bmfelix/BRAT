@@ -857,7 +857,7 @@ function Options:RefreshCompare()
     local S = BRAT.Stats
     local spec = BRAT.GetSpecID()
     cw.spec:SetText("Spec: |cffffffff" .. specName() .. "|r.  NEXT source now: |cffffffff"
-        .. S.LABEL[BRAT.db.source or "blizzard"] .. "|r" .. (BRAT.db.abTest and "  (A/B test on)" or ""))
+        .. S.LABEL[BRAT.db.source or "logs"] .. "|r" .. (BRAT.db.abTest and "  (A/B test on)" or ""))
 
     -- Knowledge
     local lines = {}

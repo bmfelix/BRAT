@@ -200,7 +200,7 @@ end
 local function rankText(spellID)
     local fn = BRAT.Rules().empower
     fn = fn and fn[BRAT.Cooldowns:Key(spellID)]
-    local r = fn and fn(BRAT.Predict.realTargets or 1)
+    local r = fn and fn(BRAT.Predict.enemies or 1)
     return r and ("R" .. r) or ""
 end
 

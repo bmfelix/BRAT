@@ -11,7 +11,7 @@ local DEFAULTS = {
     point = { "CENTER", "UIParent", "CENTER", 0, -180 },
     showOutOfCombat = true, -- show when you have an attackable target
     minSamples = 3,         -- learned follow-ups need this many sightings
-    source = nil,           -- "blizzard" | "logs"; nil = ask on first load
+    source = "logs",        -- "logs" (default) | "blizzard": only if chosen in settings / /brat source
     targets = "auto",       -- "auto" or a forced enemy count "1".."8"
     remap = {},             -- [specID][enemyCount] = rotation bucket to use instead
     abTest = false,         -- alternate NEXT source each fight to compare DPS

@@ -427,7 +427,10 @@ function Predict:GetQueue()
     -- Real enemy count (capped: above the spec's rotation cap nothing changes).
     -- Learning records under this; NEXT uses the user's remapped rotation.
     self.cap = BRAT.GetCap()
-    self.realTargets = math.min(BRAT.EnemyCount(pick), self.cap)
+    -- Uncapped enemy count, for spec rules that care past the rotation cap
+    -- (Evoker: Pyre at 5+, Eternity Surge rank).
+    self.enemies = BRAT.EnemyCount(pick)
+    self.realTargets = math.min(self.enemies, self.cap)
     self.targets = BRAT.GetRemap(self.realTargets)
     self:Observe(pick)
     -- Each new Blizzard pick teaches the cooldown tracker (see Cooldowns.lua).
@@ -469,7 +472,9 @@ function Predict:GetQueue()
     else
         useMine = BRAT.Learn:HasRotation()
     end
-    if useMine and UnitAffectingCombat("player") then
+    -- In and out of combat: before a pull BRAT reads the real cooldowns, so its
+    -- pick (the opener) is at its most reliable then.
+    if useMine then
         local mine = self:BestNow()
         if mine then first, self.nowFrom = mine, "brat" end
     end

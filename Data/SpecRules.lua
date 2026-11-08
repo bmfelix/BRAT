@@ -140,6 +140,36 @@ do
     end
     local function pyreAt() return scalecommander() and 5 or 3 end
 
+    -- Mass Disintegrate (Scalecommander): each empower makes the next
+    -- Disintegrate hit up to 4 targets. Top players at 5+ targets (Warcraft Logs,
+    -- 264 parses): Disintegrate 67% of spends when one is ready, Pyre 72% when not.
+    -- Counted from your casts (at most 2 kept); cleared when combat ends.
+    local EMPOWERS = { [FIRE_BREATH] = true, [FIRE_BREATH_FOM] = true,
+        [ETERNITY_SURGE] = true, [ETERNITY_SURGE_FOM] = true }
+    local massReady = 0
+    local mf = CreateFrame("Frame")
+    mf:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+    mf:RegisterEvent("PLAYER_REGEN_ENABLED")
+    mf:SetScript("OnEvent", function(_, event, _, _, id)
+        if event == "PLAYER_REGEN_ENABLED" then massReady = 0 return end
+        if BRAT.IsSecret(id) then return end
+        if EMPOWERS[id] then massReady = math.min(2, massReady + 1)
+        elseif id == DISINTEGRATE then massReady = math.max(0, massReady - 1) end
+    end)
+    -- Ready when the next spend happens: NOW (not cast yet) may add or use one.
+    local function massDisintegrate()
+        if not scalecommander() then return false end
+        local n, before = massReady, BRAT.Predict:Unspent()
+        if before and EMPOWERS[before] then n = n + 1 elseif before == DISINTEGRATE then n = n - 1 end
+        return n > 0
+    end
+    -- Disintegrate is the main spender below the Pyre threshold, and above it
+    -- too while Mass Disintegrate is ready.
+    -- Uses the real enemy count: the rotation's target buckets stop at its cap (4).
+    local function disintegrateMain()
+        return (BRAT.Predict.enemies or 1) < pyreAt() or massDisintegrate()
+    end
+
     -- Essence spender score: a free one (Essence Burst glowing) always goes,
     -- capped Essence goes before anything but the empowers, enough Essence is a
     -- normal spend. nil = Essence is hidden (learned from Blizzard instead).
@@ -162,7 +192,8 @@ do
     BRAT.SpecRules[1467] = {
         notes = "Devastation (12.1.5): Deep Breath (Scalecommander, recast within 18s with Strafing Run) > "
             .. "Fire Breath (rank 1) > Eternity Surge (rank 1 on 1-2 targets, +1 per 2 targets) > "
-            .. "Disintegrate (Pyre at 5+ targets as Scalecommander, 3+ as Flameshaper; Essence Burst first) > "
+            .. "Disintegrate (5+ targets: Disintegrate when Mass Disintegrate is ready, else Pyre; "
+            .. "Flameshaper: Pyre at 3+; Essence Burst first) > "
             .. "Azure Sweep > Living Flame (Burnout = instant) > Azure Strike (moving). "
             .. "Dragonrage, Tip the Scales and Twin Flame are learned.",
         order = {
@@ -172,8 +203,8 @@ do
             [FIRE_BREATH] = function() return 0.92 end,
             [ETERNITY_SURGE_FOM] = function() return 0.90 end,
             [ETERNITY_SURGE] = function() return 0.90 end,
-            [DISINTEGRATE] = function(t, free) return spend(DISINTEGRATE, free, t < pyreAt()) end,
-            [PYRE] = function(t, free) return spend(PYRE, free, t >= pyreAt()) end,
+            [DISINTEGRATE] = function(t, free) return spend(DISINTEGRATE, free, disintegrateMain(t)) end,
+            [PYRE] = function(t, free) return spend(PYRE, free, not disintegrateMain(t)) end,
             -- Rising Fury: spend a charge when under 4 Essence with no Essence Burst.
             [UNBOUND_FLAME] = function()
                 local e = BRAT.Essence()
@@ -183,10 +214,11 @@ do
             end,
             [AZURE_SWEEP] = function() return 0.55 end,
             -- Azure Strike: Azure Sweep when Eternity Surge upgraded it (glows);
-            -- the AoE filler at 3+; else only while moving (Living Flame can't be cast).
-            [AZURE_STRIKE] = function(t, free) return free and 0.55 or (t >= 3 and 0.22 or 0.12) end,
+            -- else only while moving (Living Flame can't be cast). Top players keep
+            -- Living Flame as the filler in AoE too (2-3x Azure Strike at 3-8 targets).
+            [AZURE_STRIKE] = function(_, free) return free and 0.55 or 0.12 end,
             -- Living Flame: filler; instant with Burnout (glows).
-            [LIVING_FLAME] = function(t, free) return free and 0.50 or (t >= 3 and 0.15 or 0.20) end,
+            [LIVING_FLAME] = function(_, free) return free and 0.50 or 0.20 end,
         },
         reductions = {
             -- Causality: each Disintegrate damage tick takes 0.5s off the empowers

@@ -57,7 +57,7 @@ local function redOf(x, y)
         if k.talent and not BRAT.Knows(k.talent) then return 0 end
         -- Per enemy hit, capped (Evoker Causality: Pyre 0.4s per target, at most 2s).
         if k.perTarget then
-            local t = (BRAT.Predict and BRAT.Predict.realTargets) or 1
+            local t = (BRAT.Predict and BRAT.Predict.enemies) or 1
             return math.min(k.max or math.huge, k.perTarget * t)
         end
         return k[1]

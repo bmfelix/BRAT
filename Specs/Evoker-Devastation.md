@@ -34,10 +34,22 @@ Breath duration) replaced Engulf; cast Living Flame at least once between Fire B
 ## AoE / Mythic+
 - **Eternity Surge rank = targets / 2, rounded up** (2/4/6/8 targets per rank 1/2/3/4; rank 4 needs
   Font of Magic). BRAT shows the rank on the icon ("R2").
-- **Pyre vs Disintegrate:** Scalecommander: Pyre at **5+** (Mass Disintegrate already hits 4).
-  Flameshaper: Pyre at **3+**. Icy Veins pages disagree (3+ in one place, 5+ in another).
-  Logs: top players almost never Pyre (17 Pyres vs 6,495 Disintegrates in the first 10 bosses).
-- Living Flame → Azure Strike as the filler at 3+ targets.
+- **Pyre vs Disintegrate:** Icy Veins pages disagree (3+ in one place, 5+ in another). The logs
+  settle it for Scalecommander: at **3-4 targets Disintegrate** (74-86% of spends); at **5+ targets
+  Disintegrate when Mass Disintegrate is ready** (an empower since the last Disintegrate: 67%
+  Disintegrate) and **Pyre when it isn't** (72% Pyre). BRAT counts Mass Disintegrate charges from
+  your casts. Flameshaper (no logs data): Pyre at **3+** per the guide.
+- **Filler in AoE:** the guide says Azure Strike replaces Living Flame at 3+, but top players keep
+  Living Flame (13-19% of casts at 3-8 targets vs 4-7% Azure Strike). BRAT follows the logs.
+
+### Warcraft Logs: share of casts by enemy count (264 parses)
+| Targets | Disintegrate | Pyre | Living Flame | Azure Strike | Deep Breath | Fire Breath | Eternity Surge |
+|---|---|---|---|---|---|---|---|
+| 1 | 43% | 0% | 24% | 3% | 6% | 9% | 10% |
+| 3 | 39% | 7% | 19% | 6% | 6% | 9% | 10% |
+| 5 | 29% | 18% | 15% | 7% | 7% | 10% | 10% |
+| 8+ | 23% | 24% | 13% | 4% | 8% | 10% | 10% |
+Rotation cap from the logs: 4 targets (buckets 1, 2, 3, 4+).
 - Fire Breath stays rank 1 (Icy Veins 12.1.5); the leveling guide's "max rank Fire Breath on packs"
   is older advice.
 - Pulls much beyond 5 targets favour other specs; Scalecommander stays ahead up to ~8.
@@ -85,3 +97,5 @@ Breath duration) replaced Engulf; cast Living Flame at least once between Fire B
 - Strafing Run window: 18s? (one PTR page showed a different buff duration).
 - Deep Breath base cooldown (2 min?) and how much Mass Disintegrate takes off in practice.
 - Is Unbound Flame reported as a replacement of Dragonrage (same button)?
+- Mass Disintegrate: does each empower give one charge, and do they stack (BRAT keeps at most 2)?
+  Does Disintegrate's button glow / change while one is ready?
