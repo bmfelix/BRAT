@@ -24,6 +24,7 @@ local DEFAULTS = {
     runs = {},              -- one summary per analysis run, for the trend (Report.lua)
     priority = {},          -- [specID][targets][spellID] = {w, g}: Blizzard's priority from the last analysis
     procs = {},             -- [specID][spellID] = {seen, used}: glowing spell picked next? (Procs.lua)
+    hidden = {},            -- [specID][spellID] = true: never recommend (/brat hide)
     -- Blizzard data (Learn.lua): the cache is what Blizzard picked during your
     -- fights (written when combat ends); the rotation is built from the cache.
     bcache = {},            -- [specID] = { fight records }  (Blizzard layer 1: raw cache)
@@ -81,10 +82,19 @@ function BRAT.IsReadySoon(spellID, window)
 end
 
 -- Never recommend this spell (spec rules: never), under any of its IDs.
+-- Also spells you hid yourself (/brat hide), per spec.
 function BRAT.Never(spellID)
-    local n = spellID and BRAT.Rules().never
+    if not spellID then return false end
+    local key = BRAT.Cooldowns:Key(spellID)
+    local h = BRAT.db and BRAT.db.hidden and BRAT.db.hidden[BRAT.GetSpecID()]
+    if h and (h[spellID] or h[key]) then return true end
+    local rules = BRAT.Rules()
+    -- Can't be cast right now (spec rules: available), e.g. Unbound Flame out of uses.
+    local av = rules.available and (rules.available[key] or rules.available[spellID])
+    if av and not av() then return true end
+    local n = rules.never
     if not n then return false end
-    return n[spellID] or n[BRAT.Cooldowns:Key(spellID)] or false
+    return n[spellID] or n[key] or false
 end
 
 -- Is this a spell the player actually has? (Logs data can include talents you skipped.)
@@ -94,6 +104,14 @@ function BRAT.Knows(spellID)
     return known
 end
 
+-- Is this unit a training dummy? If the game hides its name, a nameplate next to
+-- the dummy you're targeting counts as one too (they stand in a group).
+function BRAT.IsDummyUnit(unit)
+    local name = BRAT.Safe(UnitName, unit)
+    if type(name) ~= "string" then return BRAT.Context ~= nil and BRAT.Context:IsDummy() end
+    return name:lower():find("dummy", 1, true) ~= nil
+end
+
 -- Is this enemy fighting *you* (not just in combat with someone nearby)?
 -- True if it's your target or you're on its threat list. If the game hides
 -- threat (secret value), it counts, as before.
@@ -101,11 +119,24 @@ function BRAT.FightingMe(unit)
     if BRAT.Safe(UnitIsUnit, unit, "target") then return true end
     -- Training dummies keep no threat list: one in combat counts (else a pack of
     -- dummies reads as 1 target).
-    local name = BRAT.Safe(UnitName, unit)
-    if type(name) == "string" and name:lower():find("dummy", 1, true) then return true end
+    if BRAT.IsDummyUnit(unit) then return true end
     local ok, threat = pcall(UnitThreatSituation, "player", unit)
     if not ok or BRAT.IsSecret(threat) then return true end
     return threat ~= nil
+end
+
+-- Unit IDs of every nameplate on screen ("nameplate1".."nameplate40"). Read
+-- from the unit IDs themselves, not plate frame fields: those changed in
+-- Midnight (unitToken), and nameplate addons (MF Nameplates, EllesmereUI)
+-- replace the Blizzard frame that held the unit.
+local MAX_PLATES = 40
+function BRAT.PlateUnits()
+    local out = {}
+    for i = 1, MAX_PLATES do
+        local unit = "nameplate" .. i
+        if BRAT.Safe(UnitExists, unit) then out[#out + 1] = unit end
+    end
+    return out
 end
 
 -- How many enemies are we fighting? Counts hostile, in-combat enemy
@@ -123,20 +154,30 @@ function BRAT.EnemyCount(probeSpell)
     countTime = now
 
     local n, unknown = 0, false
-    local plates = C_NamePlate and C_NamePlate.GetNamePlates() or {}
-    for _, plate in ipairs(plates) do
-        local unit = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
-        if unit then
-            local hostile = BRAT.Safe(UnitCanAttack, "player", unit)
-            local fighting = BRAT.Safe(UnitAffectingCombat, unit)
-            if hostile == nil or fighting == nil then
-                unknown = true
-            elseif hostile and fighting and BRAT.FightingMe(unit) then
-                local inRange = probeSpell and BRAT.Safe(C_Spell.IsSpellInRange, probeSpell, unit)
-                if inRange ~= false then n = n + 1 end
-            end
+    -- Training dummies don't act like mobs (the game can call them out of
+    -- combat while you hit them, and they keep no threat): when you're on a
+    -- dummy, every dummy plate in range counts.
+    local onDummy = BRAT.Context and BRAT.Context:IsDummy()
+    local stats = { plates = 0, hostile = 0, combat = 0, me = 0, range = 0 }
+    for _, unit in ipairs(BRAT.PlateUnits()) do
+        stats.plates = stats.plates + 1
+        -- Midnight may hide either answer (secret value = nil here). A hidden
+        -- answer isn't a "no": skip only units known to be friendly or out of
+        -- combat, and count the rest that are fighting you and in range.
+        local hostile = BRAT.Safe(UnitCanAttack, "player", unit)
+        local fighting = BRAT.Safe(UnitAffectingCombat, unit)
+        local dummy = onDummy and BRAT.IsDummyUnit(unit)
+        if hostile ~= false then stats.hostile = stats.hostile + 1 end
+        if fighting ~= false or dummy then stats.combat = stats.combat + 1 end
+        if hostile == nil and fighting == nil and not dummy then
+            unknown = true
+        elseif hostile ~= false and (dummy or (fighting ~= false and BRAT.FightingMe(unit))) then
+            stats.me = stats.me + 1
+            local inRange = probeSpell and BRAT.Safe(C_Spell.IsSpellInRange, probeSpell, unit)
+            if inRange ~= false then n = n + 1; stats.range = stats.range + 1 end
         end
     end
+    BRAT.countStats = stats -- for /brat check
 
     if n == 0 and unknown and not warnedUnknown and UnitAffectingCombat("player") then
         warnedUnknown = true
@@ -218,6 +259,94 @@ function BRAT.MustStand(spellID, free)
     if rules.stationary and rules.stationary[BRAT.Cooldowns:Key(spellID)] then return true end
     return BRAT.CastTime(spellID) > 0 and not free
 end
+
+---------------------------------------------------------------------------
+-- Tier set bonuses, for any spec. Read from your gear's tooltips: each
+-- tier-slot item lists its set's bonuses, "(2) Set: ..." / "(4) Set: ...",
+-- active ones in green, the rest gray. Reading the bonus itself (not counting
+-- set pieces or hard-coding set IDs) means an older season's set never passes
+-- for this one's, and it keeps working next season. Spec rules ask with
+-- BRAT.SetBonus(pieces, spellID): is the active N-piece bonus about that spell?
+---------------------------------------------------------------------------
+local TIER_SLOTS = { 1, 3, 5, 7, 10 } -- head, shoulders, chest, legs, hands
+local bonusList            -- last read: { {pieces, text}, ... } (active only)
+local bonusStale = true    -- gear or item info changed since it was read
+local bonusTry = -math.huge
+local RETRY = 2            -- seconds between reads (it's asked very often)
+
+local function activeLine(line)
+    local c = line.leftColor
+    if type(c) ~= "table" or BRAT.IsSecret(c.r) or BRAT.IsSecret(c.g) then return false end
+    return type(c.r) == "number" and type(c.g) == "number" and c.g > 0.8 and c.r < 0.5
+end
+
+-- Active set bonuses: { {pieces = 2, text = "(2) Set: ..."}, ... }, or nil if
+-- your gear can't be read yet. A stale list is kept until a new read works
+-- (in combat tooltips may be hidden), so answers don't flicker.
+function BRAT.SetBonuses()
+    local now = GetTime()
+    if bonusList and not bonusStale then return bonusList end
+    if now - bonusTry < RETRY then return bonusList end
+    bonusTry = now
+    if not (C_TooltipInfo and C_TooltipInfo.GetInventoryItem) then return bonusList end
+    local out, seen, readAny = {}, {}, false
+    for _, slot in ipairs(TIER_SLOTS) do
+        -- An empty slot is known (nothing there), not "unreadable".
+        local data = GetInventoryItemLink("player", slot) == nil and { lines = {} }
+            or BRAT.Safe(C_TooltipInfo.GetInventoryItem, "player", slot)
+        if type(data) == "table" and type(data.lines) == "table" then
+            readAny = true
+            for _, line in ipairs(data.lines) do
+                local t = line.leftText
+                if type(t) == "string" and not BRAT.IsSecret(t) then
+                    local n = tonumber(t:match("^%((%d)%)"))
+                    -- Every set piece lists the same bonuses: keep each once.
+                    if n and not seen[t] and activeLine(line) then
+                        seen[t] = true
+                        out[#out + 1] = { pieces = n, text = t }
+                    end
+                end
+            end
+        end
+    end
+    if readAny then bonusList, bonusStale = out, false end
+    return bonusList
+end
+
+-- Is your active `pieces`-piece set bonus (2 or 4, exactly: the 2-piece line
+-- never answers for the 4-piece) about this spell (named in its text)?
+-- true / false, or nil = gear not readable yet (treat as no bonus).
+-- The spell name comes from the game, so any client language works.
+function BRAT.SetBonus(pieces, spellID)
+    local list = BRAT.SetBonuses()
+    if not list then return nil end
+    local name = BRAT.Safe(C_Spell.GetSpellName, spellID)
+    if type(name) ~= "string" then return nil end
+    for _, b in ipairs(list) do
+        if b.pieces == pieces and b.text:find(name, 1, true) then return true end
+    end
+    return false
+end
+
+-- Does a spec-rule entry (a reduction or proc) apply right now? Its optional
+-- conditions: `talent` = spell ID you must know; `bonus` = { pieces, spellID }:
+-- that set bonus must be active (unreadable gear = no, the safe side).
+function BRAT.RuleOn(e)
+    if e.talent and not BRAT.Knows(e.talent) then return false end
+    if e.bonus and BRAT.SetBonus(e.bonus[1], e.bonus[2]) ~= true then return false end
+    return true
+end
+
+local bf = CreateFrame("Frame")
+bf:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+bf:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+bf:SetScript("OnEvent", function(_, event)
+    bonusStale = true
+    -- Gear changed: the old answer is about other gear. Forget it (no bonus
+    -- until the new gear reads: the safe side) and read now. Item info
+    -- arriving (fires a lot): keep the answer, re-read within RETRY.
+    if event == "PLAYER_EQUIPMENT_CHANGED" then bonusList, bonusTry = nil, -math.huge end
+end)
 
 -- Evoker Essence: current, max. nil when the game hides it (secret in combat),
 -- so spec rules that use it fall back to learning from Blizzard.
@@ -344,6 +473,10 @@ f:SetScript("OnEvent", function(_, event, arg1, _, arg3)
             BRAT.History:OnCast(arg3) -- before anything changes what's shown
             BRAT.Cooldowns:OnCast(arg3)
             BRAT.Predict:OnPlayerCast(arg3)
+            -- Spec state that follows your casts (Evoker: Mass Disintegrate), after
+            -- the cooldown tracker so it counted the cast with the state before it.
+            local onCast = BRAT.Rules().onCast
+            if onCast then onCast(arg3) end
         end
     elseif event == "UPDATE_BINDINGS" or event == "ACTIONBAR_SLOT_CHANGED"
         or event == "PLAYER_SPECIALIZATION_CHANGED" then
@@ -406,6 +539,31 @@ SlashCmdList.BRAT = function(input)
                 fights, lines, db.recordHistory and "recording" or "off"))
             say("To analyze: /reload, then run tools\\Analyze-History.ps1 on your PC.")
         end
+    elseif cmd == "hide" or cmd == "unhide" then
+        -- /brat hide [next]: never recommend the spell in NOW (or NEXT) again.
+        -- /brat unhide: show everything again. /brat hide list: what's hidden.
+        local spec = BRAT.GetSpecID()
+        db.hidden[spec] = db.hidden[spec] or {}
+        local h = db.hidden[spec]
+        local function nm(id) return C_Spell.GetSpellName(id) or tostring(id) end
+        if cmd == "unhide" then
+            db.hidden[spec] = {}
+            say("hidden spells cleared for this spec: everything can be recommended again.")
+        elseif rest == "list" then
+            local names = {}
+            for id in pairs(h) do names[#names + 1] = nm(id) end
+            say(#names > 0 and ("hidden for this spec: " .. table.concat(names, ", ") .. ". /brat unhide to clear.")
+                or "nothing hidden for this spec.")
+        else
+            local id = (rest == "next") and BRAT.Predict.shownNext or BRAT.Predict.shownNow
+            if not id then
+                say("nothing in " .. (rest == "next" and "NEXT" or "NOW") .. " to hide right now.")
+            else
+                h[id] = true
+                h[BRAT.Cooldowns:Key(id)] = true
+                say(nm(id) .. " won't be recommended again on this spec. /brat hide list | /brat unhide")
+            end
+        end
     elseif cmd == "why" then
         BRAT.Predict:Why(say)
     elseif cmd == "watch" then
@@ -416,7 +574,7 @@ SlashCmdList.BRAT = function(input)
     elseif cmd == "check" then
         BRAT.Check:Print()
     elseif cmd == "help" then
-        say("/brat (settings) | check | why | watch | lock | unlock | scale <0.5-3> | keysize <8-32> | next <0-2> | soon <0-10> | analyze [last N fights] | history | averages [wcl|blizzard] | rotation [wcl|blizzard] | reset | stats | forget | source [logs|blizzard] | targets [auto|1-8]")
+        say("/brat (settings) | check | why | watch | hide [next] | hide list | unhide | lock | unlock | scale <0.5-3> | keysize <8-32> | next <0-2> | soon <0-10> | analyze [last N fights] | history | averages [wcl|blizzard] | rotation [wcl|blizzard] | reset | stats | forget | source [logs|blizzard] | targets [auto|1-8]")
     elseif cmd == "stats" then
         BRAT.Predict:PrintStats(say)
     elseif cmd == "targets" then

@@ -43,6 +43,12 @@ function Context:Where()
     return "raid", nil, "Raid"
 end
 
+-- Targeting any training dummy (cleave, dungeoneer's, plain)?
+function Context:IsDummy()
+    local target = lower(BRAT.Safe(UnitName, "target"))
+    return target ~= nil and target:find("dummy", 1, true) ~= nil
+end
+
 -- Targeting the Dungeoneer's Training Dummy (a single-target boss)?
 function Context:IsSingleTargetDummy()
     local target = lower(BRAT.Safe(UnitName, "target"))

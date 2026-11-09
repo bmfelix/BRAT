@@ -10,6 +10,8 @@
 --              Seconds a cast takes off that spell's cooldown. A listed spell
 --              uses only these (no learning on top). {} = nothing reduces it.
 --   lengths    [spellID] = seconds. Cooldown length if the game won't say.
+--              Or function() -> seconds: computed live (e.g. a tier set bonus
+--              shortens it), used over what the game reports.
 --   procs      { spell, talent, gives, count, duration, name }: casting `spell`
 --              (with `talent`) makes the next `count` casts of `gives` free.
 --   dots       [spellID] = { duration, refreshedBy = { spellIDs } }: kept up; BRAT
@@ -18,6 +20,8 @@
 --   stationary [spellID] = true: can't be cast while moving although the game
 --              reports no cast time (channels, empowered spells).
 --   moveBuff   spellID of a buff that lets you cast while moving (Evoker: Hover).
+--   available  [spellID] = function() -> false when it can't be cast right now
+--              (Evoker: Unbound Flame with no uses left); then it's never offered.
 --   noCooldown [spellID] = true: has no cooldown, whatever the game reports.
 --   why        function(say): extra lines for /brat why (the facts a rule uses).
 --   ignoreCasts [spellID] = true: automatic "casts" that aren't button presses
@@ -26,7 +30,18 @@
 --              shown on the icon as "R1".."R4".
 -- Order functions may return nil: "no opinion right now" (e.g. Essence is
 -- hidden), and that spell's score is learned from Blizzard instead.
--- A reduction may be { perTarget = s, max = s, talent = id }: s per enemy hit.
+-- A reduction may be { perTarget = s, max = s, talent = id }: s per enemy hit,
+-- or { fn = function(enemies) -> seconds, talent = id }.
+--   castAs     function(spellID) -> spellID: what a cast counts as for cooldown
+--              reductions (Evoker: Disintegrate with a Mass Disintegrate charge
+--              counts as Mass Disintegrate, 436335).
+-- Reductions and procs may carry conditions: talent = id (you know it) and/or
+-- bonus = { pieces, spellID } (that set bonus is active; see BRAT.RuleOn).
+-- Tier set bonuses: rules call BRAT.SetBonus(2 or 4, spellID) (Core.lua): true
+-- when that active set bonus names the spell (read from your gear's tooltips;
+-- 2- and 4-piece lines are kept apart), false, or nil = gear not readable yet.
+--   onCast     function(spellID): called on each of your casts, after BRAT's
+--              cooldown tracker has counted it (spec state like Mass Disintegrate).
 -- Spell IDs are the ones the game uses in 12.1 (from Warcraft Logs data).
 local _, BRAT = ...
 
@@ -82,12 +97,22 @@ BRAT.SpecRules = {
         },
         reductions = {},
         lengths = {
-            [1227280] = 20,  -- Tentacle Slam: 20s fixed (Icy Veins)
+            -- Tentacle Slam: 20s fixed (Icy Veins); 17s with the Season 2 2-piece
+            -- ("Tentacle Slam cooldown reduced by 3 sec", all sources agree).
+            [1227280] = function() return BRAT.SetBonus(2, 1227280) == true and 17 or 20 end,
             [228260] = 120,  -- Voidform: 2 min
             [1242173] = 15,  -- Void Volley: 15s (hasted) during Voidform
             [10060] = 120,   -- Power Infusion
         },
-        procs = {},
+        procs = {
+            -- Season 2 4-piece (Icy Veins 12.1.5): Tentacle Slam grants a free Void
+            -- Volley, castable outside Voidform too. An earlier preview listed a
+            -- different 4-piece (instant Vampiric Touch): requiring the active
+            -- 4-piece line to name Void Volley means only the version modeled here
+            -- counts. No duration published: BRAT still only offers it while the
+            -- game says Void Volley is usable.
+            { spell = 1227280, bonus = { 4, 1242173 }, gives = 1242173, count = 1, name = "Tier 4-piece" },
+        },
         dots = {
             -- With Misery both last 21s (pandemic 6.3s); Vampiric Touch applies
             -- Shadow Word: Pain, and Tentacle Slam applies Vampiric Touch.
@@ -112,7 +137,13 @@ BRAT.SpecRules = {
             [32379] = function() return 0.40 end,   -- Shadow Word: Death
             [585] = function() return 0.20 end,     -- Smite (filler)
         },
-        reductions = {}, -- tier 2pc (Penance -> Mind Blast -2s) is learned, since set bonuses vary
+        reductions = {
+            -- Season 2 2-piece: each Penance takes 2s off Mind Blast (Method,
+            -- Conquest Capped 12.1.5). Only while that 2-piece is active.
+            -- (Listing Mind Blast here means nothing else is learned for it; if
+            -- something else shortens it, Blizzard's pick corrects the timer.)
+            [8092] = { [47540] = { 2, bonus = { 2, 47540 } } },
+        },
         lengths = {},
         procs = {},
         dots = {
@@ -151,15 +182,45 @@ do
     local EMPOWERS = { [FIRE_BREATH] = true, [FIRE_BREATH_FOM] = true,
         [ETERNITY_SURGE] = true, [ETERNITY_SURGE_FOM] = true }
     local massReady = 0
+    -- Rising Fury: after Dragonrage, Unbound Flame can be cast 4 times (then the
+    -- button waits for Dragonrage's cooldown). Counted from your casts.
+    local DRAGONRAGE, UNBOUND_USES = 375087, 4
+    local unboundLeft = 0
+    -- Season 2 tier set, 4 pieces: Causality takes 0.1s more each time it
+    -- triggers (Icy Veins 12.1.5). Read from the active 4-piece bonus naming
+    -- Causality (BRAT.SetBonus, Core.lua), so an older set doesn't count; until
+    -- gear can be read, no bonus (the safe side).
+    -- (The 2-piece, Shattering Star always at max empower, changes no decision:
+    -- Eternity Surge still ranks up with targets in AoE, Icy Veins / Maxroll 12.1.5.)
+    local function tierBonus() return BRAT.SetBonus(4, CAUSALITY) end
+    -- Seconds Causality takes off the empowers each time it triggers.
+    local function causalityHit() return tierBonus() == true and 0.6 or 0.5 end
+
     local mf = CreateFrame("Frame")
-    mf:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
     mf:RegisterEvent("PLAYER_REGEN_ENABLED")
-    mf:SetScript("OnEvent", function(_, event, _, _, id)
-        if event == "PLAYER_REGEN_ENABLED" then massReady = 0 return end
-        if BRAT.IsSecret(id) then return end
+    mf:SetScript("OnEvent", function() massReady = 0 end)
+    -- Your casts (rules.onCast, called by Core after the cooldown tracker has
+    -- counted the cast, so castAs below still sees the state before it).
+    local function onCast(id)
         if EMPOWERS[id] then massReady = math.min(2, massReady + 1)
-        elseif id == DISINTEGRATE then massReady = math.max(0, massReady - 1) end
-    end)
+        elseif id == DISINTEGRATE then massReady = math.max(0, massReady - 1)
+        elseif id == DRAGONRAGE then unboundLeft = UNBOUND_USES
+        elseif id == UNBOUND_FLAME then unboundLeft = math.max(0, unboundLeft - 1) end
+    end
+    -- A Disintegrate cast with a Mass Disintegrate charge ready counts as Mass
+    -- Disintegrate for cooldown reductions (it hits more targets: more Causality).
+    local function castAs(id)
+        if id == DISINTEGRATE and massReady > 0 and scalecommander() then return MASS_DISINTEGRATE end
+        return id
+    end
+    -- Unbound Flame uses left: the game's count when it shows it, else ours.
+    local function unboundCharges()
+        local ch = BRAT.Safe(C_Spell.GetSpellCharges, UNBOUND_FLAME)
+        if type(ch) == "table" and type(ch.currentCharges) == "number" and not BRAT.IsSecret(ch.currentCharges) then
+            return ch.currentCharges
+        end
+        return unboundLeft
+    end
     -- Ready when the next spend happens: NOW (not cast yet) may add or use one.
     local function massDisintegrate()
         if not scalecommander() then return false end
@@ -196,6 +257,23 @@ do
         return main and 0.60 or 0.30
     end
 
+    -- Causality reductions, the same for both empowers (see reductions below).
+    -- h = seconds per trigger: 0.5, or 0.6 with the tier 4-piece.
+    local DISINTEGRATE_TICKS = 4
+    local causality = {
+        -- Each damage tick triggers it: 4 ticks per full channel (2s, 2.4s with 4pc).
+        [DISINTEGRATE] = { fn = function() return DISINTEGRATE_TICKS * causalityHit() end, talent = CAUSALITY },
+        -- Mass Disintegrate: + 1/12 per extra target hit (up to 3), fitted from
+        -- Brad's fights: 3.0s at 4+ targets with the 4-piece (2.5s without).
+        [MASS_DISINTEGRATE] = { fn = function(n)
+            local extra = math.min(3, math.max(0, n - 1))
+            return DISINTEGRATE_TICKS * causalityHit() * (1 + extra / 12)
+        end, talent = CAUSALITY },
+        -- Pyre: per enemy hit (0.4s, 0.5s with 4pc), at most 2s (the 4pc's effect
+        -- on the cap isn't documented: left at 2s, the safe side).
+        [PYRE] = { fn = function(n) return math.min(2, (causalityHit() - 0.1) * n) end, talent = CAUSALITY },
+    }
+
     BRAT.SpecRules[1467] = {
         notes = "Devastation (12.1.5): Deep Breath (Scalecommander, recast within 18s with Strafing Run) > "
             .. "Fire Breath (rank 1) > Eternity Surge (rank 1 on 1-2 targets, +1 per 2 targets) > "
@@ -211,15 +289,26 @@ do
                 e and ("%d / %d"):format(e, max) or "hidden by the game (when to spend is learned)",
                 n, pyreAt(), scalecommander() and "Scalecommander" or "Flameshaper",
                 massReady, disintegrateMain() and "Disintegrate" or "Pyre"))
+            local tb = tierBonus()
+            say(("  Tier set: Causality 4-piece bonus %s -> %.1fs per trigger."):format(
+                tb == true and "active" or (tb == false and "not active" or "not readable yet"), causalityHit()))
         end,
         -- No cooldown, whatever the game reports while you wait for Essence
         -- (BRAT had learned a 13s "cooldown" on both).
         noCooldown = { [DISINTEGRATE] = true, [PYRE] = true, [LIVING_FLAME] = true, [AZURE_STRIKE] = true },
         -- Never recommended, even when Blizzard's assistant picks them: Tail Swipe,
         -- Wing Buffet (knockbacks, not damage buttons).
-        never = { [368970] = true, [357214] = true },
+        -- Azure Strike: Brad doesn't use it (not on his bars), 2026-11-08. Its
+        -- Azure Sweep upgrade (a different spell ID while active) still shows.
+        never = { [368970] = true, [357214] = true, [362969] = true },
+        -- Castable right now? (false = never offered at the moment.)
+        available = {
+            [UNBOUND_FLAME] = function() return unboundCharges() > 0 end,
+        },
         -- Charged Blast (370454): automatic, four casts per Disintegrate tick. Not a button.
         ignoreCasts = { [370454] = true },
+        onCast = onCast,
+        castAs = castAs,
         order = {
             -- Dragonrage: on cooldown (Icy Veins 12.1.5: the spec's one major cooldown, 2 min).
             [375087] = function() return 0.95 end,
@@ -247,12 +336,17 @@ do
             [LIVING_FLAME] = function(_, free) return free and 0.50 or 0.20 end,
         },
         reductions = {
-            -- Causality: each Disintegrate damage tick takes 0.5s off the empowers
+            -- Causality: each time Disintegrate deals damage, 0.5s off the empowers
             -- (4 ticks per full channel = 2s); Pyre 0.4s per enemy hit, at most 2s.
-            [FIRE_BREATH_FOM] = { [DISINTEGRATE] = { 2, talent = CAUSALITY }, [PYRE] = { perTarget = 0.4, max = 2, talent = CAUSALITY } },
-            [FIRE_BREATH] = { [DISINTEGRATE] = { 2, talent = CAUSALITY }, [PYRE] = { perTarget = 0.4, max = 2, talent = CAUSALITY } },
-            [ETERNITY_SURGE_FOM] = { [DISINTEGRATE] = { 2, talent = CAUSALITY }, [PYRE] = { perTarget = 0.4, max = 2, talent = CAUSALITY } },
-            [ETERNITY_SURGE] = { [DISINTEGRATE] = { 2, talent = CAUSALITY }, [PYRE] = { perTarget = 0.4, max = 2, talent = CAUSALITY } },
+            -- Tier 4-piece: 0.6s per trigger. Mass Disintegrate hits up to 3 more
+            -- targets, so it takes off more: fitted from Brad's 12.1.5 fights (20 AoE
+            -- cooldowns vs Blizzard's picks, 4-piece worn). Deliberately on the low side:
+            -- when Blizzard picks the empower first, BRAT's timer is corrected
+            -- (Cooldowns.lua OnPicked), but nothing corrects a timer that runs fast.
+            [FIRE_BREATH_FOM] = causality,
+            [FIRE_BREATH] = causality,
+            [ETERNITY_SURGE_FOM] = causality,
+            [ETERNITY_SURGE] = causality,
             -- Deep Breath (Mass Disintegrate: 1s per target hit) is learned: how
             -- many Disintegrates are "Mass" depends on the empowers in between.
         },

@@ -28,7 +28,7 @@ function Display:ClearKeyCache() wipe(keyCache) end
 local function shortKey(key)
     return key:gsub("SHIFT%-", "S"):gsub("CTRL%-", "C"):gsub("ALT%-", "A")
         :gsub("MOUSEBUTTON", "M"):gsub("NUMPAD", "N"):gsub("MOUSEWHEELUP", "WU")
-        :gsub("MOUSEWHEELDOWN", "WD")
+        :gsub("MOUSEWHEELDOWN", "WD"):gsub("BUTTON", "M") -- mouse buttons: BUTTON3 -> M3
 end
 
 local function bindingForSlot(slot)
@@ -134,6 +134,9 @@ function Display:Init()
 
     self.now = makeIcon(root, SIZE_NOW, "NOW")
     self.now:SetPoint("LEFT")
+    -- Countdown when NOW's spell comes off cooldown as your current cast ends.
+    self.now.timer = self.now:CreateFontString(nil, "OVERLAY", "NumberFontNormalLarge")
+    self.now.timer:SetPoint("CENTER")
     self.next = makeIcon(root, SIZE_NEXT, "NEXT")
     self.next:SetPoint("LEFT", self.now, "RIGHT", 8, 0)
     self.next2 = makeIcon(root, SIZE_THEN, "THEN")
@@ -274,6 +277,16 @@ function Display:Update()
     end
 
     setIcon(self.now, first)
+    -- NOW's spell not ready yet (it will be when your current cast ends):
+    -- show the seconds, so a spell on cooldown never looks pressable.
+    local nowLeft = first and not BRAT.Predict:IsFree(first) and BRAT.Cooldowns:Left(first) or 0
+    if nowLeft > 0.3 then
+        self.now.timer:SetText(("%.1f"):format(nowLeft))
+        self.now.icon:SetDesaturated(true)
+    else
+        self.now.timer:SetText("")
+        self.now.icon:SetDesaturated(false)
+    end
     setIcon(self.next, second)
     setIcon(self.next2, third)
     if third then setSourceBorder(self.next2, source3) end

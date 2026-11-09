@@ -75,7 +75,7 @@ function Predict:OnPlayerCast(spellID)
     -- a second Deep Breath) comes from the normal cast only, not the free one.
     for _, fp in ipairs(BRAT.Rules().procs) do
         local renews = fp.gives == fp.spell and usedFree
-        if CDs:Key(spellID) == fp.spell and BRAT.Knows(fp.talent) and not renews then
+        if CDs:Key(spellID) == fp.spell and BRAT.RuleOn(fp) and not renews then
             free[fp.gives] = fp.count
             free["why" .. fp.gives] = fp.name
             free["exp" .. fp.gives] = fp.duration and (GetTime() + fp.duration) or nil
@@ -115,7 +115,13 @@ function Predict:Observe(pick)
         local free = Predict.freeCasts
         -- (Not for spells with a known proc rule like Empyreal Blaze: those are
         -- counted exactly, and a normal cast after a free one isn't a free cast.)
-        if pick == pendingFrom and not Predict:CanRepeat(pick) and not Predict:HasKnownProc(pick) then
+        -- Not for spells the spec rules fully time (their reductions are known) or
+        -- empowered spells: Blizzard keeps recommending an empower for a moment
+        -- after you release it, which isn't a reset (Evoker: Eternity Surge and
+        -- Fire Breath were marked free for the whole fight).
+        local rules, K = BRAT.Rules(), BRAT.Cooldowns:Key(pick)
+        local timed = rules.reductions[K] or (rules.empower and rules.empower[K])
+        if pick == pendingFrom and not timed and not Predict:CanRepeat(pick) and not Predict:HasKnownProc(pick) then
             -- At least the one Blizzard is showing now.
             free[pick] = math.max(free[pick] or 0, 1)
         elseif free[pendingFrom] and not free["why" .. pendingFrom] then
@@ -168,7 +174,7 @@ local function freeProcs() return BRAT.Rules().procs end
 function Predict:HasKnownProc(id)
     local k = BRAT.Cooldowns:Key(id)
     for _, fp in ipairs(freeProcs()) do
-        if fp.gives == k and BRAT.Knows(fp.talent) then return true end
+        if fp.gives == k and BRAT.RuleOn(fp) then return true end
     end
     return false
 end
@@ -216,7 +222,7 @@ function Predict:IsFree(id, current)
     for _, fp in ipairs(freeProcs()) do
         -- Self-renewing procs (Strafing Run): NOW being the free cast gives nothing.
         local renews = fp.gives == fp.spell and hadFree
-        if fp.gives == id and BRAT.Knows(fp.talent) and not renews then
+        if fp.gives == id and BRAT.RuleOn(fp) and not renews then
             if current and CDs:Key(current) == fp.spell then
                 n = math.max(n, fp.count)
                 why = fp.name
@@ -237,10 +243,43 @@ end
 -- How long until the predicted spell gets cast: NOW's cast time or your
 -- (haste-adjusted) global cooldown, whichever is longer; for THEN, plus the
 -- same for NEXT. A spell counts as ready if it's ready by then.
+local castingNow -- (defined below) spell you're casting now, seconds left, empowered?
+
+-- Seconds left on the global cooldown (the game's when readable, else from
+-- your last cast).
+local function gcdLeft()
+    local cd = BRAT.Safe(C_Spell.GetSpellCooldown, 61304)
+    if cd and not BRAT.IsSecret(cd.startTime) and not BRAT.IsSecret(cd.duration) and cd.duration then
+        return math.max(0, cd.startTime + cd.duration - GetTime())
+    end
+    return math.max(0, (Predict.lastCastAt or 0) + BRAT.GCD() - GetTime())
+end
+
+-- How long until the spell `current` is done, so the next press can happen:
+--   you're casting it now      -> time left on the cast (an empower is let go
+--                                 early, at rank 1: at most a GCD), or the GCD
+--   you just cast it           -> what's left of the GCD
+--   not cast yet (NOW, waiting) -> its whole cast time or a GCD
+local function timeFor(id, inProgress)
+    local K = BRAT.Cooldowns.Key
+    if inProgress and id then
+        local c, left, empowered = castingNow()
+        if c and K(nil, c) == K(nil, id) then
+            if empowered then left = math.min(left, BRAT.GCD()) end
+            return math.max(left, gcdLeft())
+        end
+        if not c and Predict.lastCastSpell == K(nil, id) and GetTime() - (Predict.lastCastAt or 0) < BRAT.GCD() then
+            return gcdLeft()
+        end
+    end
+    return math.max(BRAT.GCD(), id and BRAT.CastTime(id) or 0)
+end
+
+-- Predict.inProgress: `current` is the spell you're casting / just cast (BestNow
+-- asking "what after this cast?"), not a NOW you haven't pressed yet.
 local function readyWindow(current)
-    local function one(id) return math.max(BRAT.GCD(), id and BRAT.CastTime(id) or 0) end
-    local w = one(current) + 0.1
-    if castBefore then for b in pairs(castBefore) do w = w + one(b) end end
+    local w = timeFor(current, Predict.inProgress) + 0.1
+    if castBefore then for b in pairs(castBefore) do w = w + timeFor(b, false) end end
     return w
 end
 
@@ -275,9 +314,15 @@ end
 -- whole time you hold them and a moment after. That's the cast, not the spell,
 -- so then "usable" isn't trusted and readiness comes from BRAT's own cooldown
 -- timers (fillers with no cooldown are ready).
-local castingNow -- defined below
+-- Only around empowered spells: holding one, or the moment after letting go.
+-- (Everywhere else "unusable" is real, e.g. Unbound Flame with no charges left.)
 local function locked()
-    return castingNow() ~= nil or GetTime() - (Predict.lastCastAt or 0) < BRAT.GCD()
+    local _, _, empowered = castingNow()
+    if empowered then return true end
+    local emp = BRAT.Rules().empower
+    local last = Predict.lastCastSpell
+    return emp ~= nil and last ~= nil and emp[last] ~= nil
+        and GetTime() - (Predict.lastCastAt or 0) < BRAT.GCD() + 0.5
 end
 local function usable(id) return BRAT.IsUsable(id) or locked() end
 local function readySoon(id, window)
@@ -513,6 +558,7 @@ function Predict:GetQueue()
     self.shownNow = first
     local second, source = self:GetNext(first)
     self.lastKind = source
+    self.shownNext = second -- for /brat hide next
     -- /brat watch: one chat line whenever NEXT changes, with the reason.
     if self.watch and (second ~= self.watchLast or first ~= self.watchNow) then
         self.watchLast, self.watchNow = second, first
@@ -532,13 +578,21 @@ function Predict:GetQueue()
 end
 
 -- The spell you're casting right now (cast or channel), or nil.
-function castingNow() -- the local declared above candidateOK
+function castingNow() -- the local declared above readyWindow
     for _, fn in ipairs({ UnitCastingInfo, UnitChannelInfo }) do
-        local ok, name, _, _, _, _, _, _, a8, a9 = pcall(fn, "player")
+        local ok, name, _, _, _, endMS, _, _, a8, a9 = pcall(fn, "player")
         if ok and name and not BRAT.IsSecret(name) then
-            -- UnitCastingInfo: spellID is the 9th value; UnitChannelInfo: the 8th.
-            local id = (fn == UnitCastingInfo) and a9 or a8
-            if type(id) == "number" and not BRAT.IsSecret(id) then return id end
+            -- UnitCastingInfo: spellID is the 9th value; UnitChannelInfo: the 8th,
+            -- then isEmpowered (Evoker: Fire Breath, Eternity Surge).
+            local isCast = fn == UnitCastingInfo
+            local id = isCast and a9 or a8
+            if type(id) == "number" and not BRAT.IsSecret(id) then
+                local left = 0
+                if type(endMS) == "number" and not BRAT.IsSecret(endMS) then
+                    left = math.max(0, endMS / 1000 - GetTime())
+                end
+                return id, left, (not isCast) and not BRAT.IsSecret(a9) and a9 == true
+            end
         end
     end
 end
@@ -566,7 +620,13 @@ function Predict:BestNow()
     if not after and self.lastCastSpell and GetTime() - (self.lastCastAt or 0) < BRAT.GCD() then
         after = self.lastCastSpell
     end
-    if after then return (self:GetNext(after)) end
+    if after then
+        self.inProgress = true
+        local ok, pick = pcall(self.GetNext, self, after)
+        self.inProgress = false
+        if not ok then error(pick, 0) end
+        return pick
+    end
     self.after, self.window = nil, 0 -- idle: nothing is cast before this pick
 
     local tg = self.targets or 1
@@ -645,6 +705,19 @@ function Predict:Why(say)
         self.nowFrom == "brat" and "BRAT's rotation" or "Blizzard's assistant", name(self.lastPick),
         name(nxt), tostring(kind)))
     say("Spec rules: " .. (BRAT.Rules().notes or "none for this spec yet (everything is learned)"))
+    -- Set bonuses BRAT sees as active (any spec; spec rules use them by name).
+    local bonuses = BRAT.SetBonuses()
+    if not bonuses then
+        say("  Set bonuses: gear not readable yet.")
+    elseif #bonuses == 0 then
+        say("  Set bonuses: none active.")
+    else
+        for _, b in ipairs(bonuses) do
+            local t = b.text
+            if #t > 90 then t = t:sub(1, 87) .. "..." end
+            say("  Set bonus active: " .. t)
+        end
+    end
     if nxt then
         local left, est = BRAT.Cooldowns:Left(nxt)
         local free, freeWhy = self:IsFree(nxt, now)

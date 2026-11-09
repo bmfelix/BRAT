@@ -67,8 +67,10 @@ Rotation cap from the logs: 4 targets (buckets 1, 2, 3, 4+).
 ## Mechanics
 | Rule | Value | Confidence |
 |---|---|---|
-| Causality | Disintegrate: 0.5s off Fire Breath / Eternity Surge per damage tick (≈2s per full channel); Pyre: 0.4s per enemy hit, max 2s | guide (spell list), 12.0.1 tooltip |
-| Tier 4pc (S2) | Causality +0.1s per trigger; Eternity Surge +10% | guide — **not modeled** |
+| Causality | Disintegrate: 0.5s off Fire Breath / Eternity Surge each time it deals damage (≈2s per full channel); Pyre: 0.4s per enemy hit, max 2s | guide (spell list), Warcraft Wiki, 12.0.1 tooltip |
+| Causality + Mass Disintegrate | More than a plain Disintegrate (it deals damage to more targets). Brad's 12.1.5 fights (20 AoE cooldowns vs Blizzard's picks, 4pc worn): Disintegrate × (1 + 1/12 per extra target), 3.0s at 4+ with 4pc, 2.5s without. Kept on the low side; Blizzard's pick of an empower (4s+ after you cast it) corrects the timer | Brad's logs, 2026-11-09 |
+| Tier 2pc (S2) | Shattering Star +50% damage, always at max empower level (Seramate's PTR article said 150%; later sources 50%) | Icy Veins / Maxroll 12.1.5 — **no rotation change**: Eternity Surge stays rank 1 single target and still ranks up with targets in AoE (Icy Veins M+, Maxroll). Shown in `/brat why` |
+| Tier 4pc (S2) | Causality +0.1s per trigger (0.6s per Disintegrate tick, 0.5s per Pyre target, Pyre cap left at 2s); Eternity Surge +10% | guide; modeled — detected from the set bonus itself: an active (green) "(4)" tooltip line on a tier-slot item that names Causality (no spell/set ID published; an older set or 3 pieces doesn't count). Brad's single-target logs fit 0.6s/tick |
 | Mass Disintegrate → Deep Breath | 1s off Deep Breath per target hit (12.1, was 0.5s) | official 12.1 notes → *learned* |
 | Strafing Run | Deep Breath recast within 18s (+20% damage) | guide + 12.0 beta tooltip |
 | Fire Breath / Eternity Surge | 30s; Eternity Surge 27s with Event Horizon | from memory of the tooltip; real value read from the game |
@@ -85,10 +87,17 @@ Rotation cap from the logs: 4 targets (buckets 1, 2, 3, 4+).
   glowing Disintegrate is a free spend and goes first.
 - **Can't move while casting**: Disintegrate and the empowers are marked stationary (the game reports
   no cast time for them). Hover lifts it. While moving: Pyre (instant) / Azure Strike.
+- **Fire Breath / Eternity Surge timers**: BRAT times them from your casts minus Causality
+  (a Disintegrate cast with a Mass Disintegrate charge counts as Mass Disintegrate). If Blizzard's
+  assistant picks one 4s+ after you cast it, that's taken as proof it's ready. Before 2026-11-09 the
+  timer ignored that and ran up to 11s slow in AoE, so BRAT showed Disintegrate / Pyre instead.
 - **Strafing Run** is a "free cast" proc: the first Deep Breath gives one free recast for 18s; the
   free one doesn't give another.
 
 ## To confirm in game (tooltips)
+- Tier 4-piece detection: `/brat why` should say "Causality 4-piece bonus active" with the Season 2
+  set on, "not active" with an older set or 3 pieces. (Relies on the bonus line starting "(4)" and
+  being green when active.)
 - Fire Breath / Eternity Surge cooldowns (30s? 27s with Event Horizon?).
 - Disintegrate: how many damage ticks (Causality = 0.5s each — is a full channel 2s?). With the 4pc, 0.6s.
 - Is Essence readable in combat? (`/brat why` shows "Essence: x / y" or "hidden".)

@@ -31,7 +31,8 @@ trinkets/potion/Power Infusion, Shadow Word: Madness, Void Torrent.
 | Voidform | 2 min; pairs with Power Infusion; gives Void Volley (15s, hasted) | guide (one source says 3 uses) |
 | Tentacle Slam | 20s fixed; applies Vampiric Touch to up to 6 | guide (one source says 2 charges) |
 | Halo | used ~2× per Voidform | guide |
-| Season 2 tier | 2pc: Tentacle Slam cd −3s, +100% dmg; 4pc: Tentacle Slam grants a free Void Volley | search summary only |
+| Season 2 tier 2pc | Tentacle Slam cd −3s (20 → 17s), +100% damage | all sources agree → **modeled** (length 17s while the active 2-piece names Tentacle Slam) |
+| Season 2 tier 4pc | Tentacle Slam grants a free Void Volley (castable outside Voidform) | Icy Veins 12.1.5 → **modeled** as a free-cast proc, only if the active 4-piece line names Void Volley. An earlier preview (MMO-Champion, Conquest Capped) listed "next Vampiric Touch instant + Shadowy Apparitions" instead: that version isn't modeled and won't match. Proc duration unknown: offered only while the game says Void Volley is usable |
 
 ## To confirm in game (tooltips)
 - Tentacle Slam: cooldown and charges.

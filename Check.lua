@@ -124,22 +124,30 @@ end)
 
 add("Enemy count", function()
     if BRAT.db.targets ~= "auto" then return "ok", "fixed at " .. BRAT.db.targets end
-    if GetCVar and GetCVar("nameplateShowEnemies") ~= "1" then
-        return "bad", "enemy nameplates are off", "Press V (or Options > Nameplates) so Auto can count enemies."
-    end
-    local plates = C_NamePlate and C_NamePlate.GetNamePlates() or {}
-    local readable, secret = 0, 0
-    for _, p in ipairs(plates) do
-        local unit = p.namePlateUnitToken or (p.UnitFrame and p.UnitFrame.unit)
-        if unit then
-            local ok, v = pcall(UnitCanAttack, "player", unit)
-            if ok and BRAT.IsSecret(v) then secret = secret + 1 elseif ok then readable = readable + 1 end
+    local plates = BRAT.PlateUnits()
+    -- Only call nameplates "off" when the setting explicitly says so and none are
+    -- on screen: nameplate addons (EllesmereUI, ...) and Midnight's settings
+    -- don't always use this setting.
+    if #plates == 0 then
+        if GetCVar and GetCVar("nameplateShowEnemies") == "0" then
+            return "bad", "enemy nameplates are off", "Press V (or Options > Nameplates) so Auto can count enemies."
         end
+        return "ok", "auto, no nameplates on screen right now (target a group of enemies and check again)"
+    end
+    local readable, secret = 0, 0
+    for _, unit in ipairs(plates) do
+        local ok, v = pcall(UnitCanAttack, "player", unit)
+        if ok and BRAT.IsSecret(v) then secret = secret + 1 elseif ok then readable = readable + 1 end
     end
     if secret > 0 and readable == 0 then
         return "bad", "nameplate info is secret", "Auto can't count here; set a fixed count in /brat > Rotations."
     end
-    return "ok", ("auto, %d nameplates visible, counting %d enemies now"):format(#plates, BRAT.Predict.realTargets or 1)
+    -- Where plates drop out of the count (from the last count, in combat).
+    local s = BRAT.countStats
+    local why = s and (" (of %d plates: %d hostile, %d in combat, %d fighting you, %d in range)"):format(
+        s.plates, s.hostile, s.combat, s.me, s.range) or ""
+    return "ok", ("auto, %d nameplates visible, counting %d enemies now%s"):format(#plates,
+        BRAT.Predict.enemies or BRAT.Predict.realTargets or 1, why)
 end)
 
 add("Keybinds", function()
@@ -174,7 +182,8 @@ add("Damage meter", function()
 end)
 
 add("Your parses", function()
-    local p = BRAT.Stats:Parses()
+    local _, ps = BRAT.Stats:Winner(BRAT.GetSpecID())
+    local p = { logs = ps.raw.logs, blizzard = ps.raw.blizzard }
     local n = p.logs.n + p.blizzard.n
     if n == 0 then
         return "warn", "none yet", "After a raid: upload logs, /reload, run tools\\Fetch-MyParses.ps1, /reload."
@@ -209,12 +218,16 @@ function Check:Print()
     end
 end
 
--- At login: stay quiet unless something is actually broken.
+-- At login: stay quiet unless something is actually broken; then say what's
+-- wrong and how to fix it right here (no second command needed).
 function Check:LoginNotice()
-    local bad = 0
-    for _, r in ipairs(self:RunAll()) do if r.status == "bad" then bad = bad + 1 end end
-    if bad > 0 then
-        print(("|cff66ccffBRAT|r: %d problem%s found. Type |cffffffff/brat check|r for details."):format(
-            bad, bad == 1 and "" or "s"))
+    local bad = {}
+    for _, r in ipairs(self:RunAll()) do if r.status == "bad" then bad[#bad + 1] = r end end
+    if #bad == 0 then return end
+    print(("|cff66ccffBRAT|r: %d problem%s found:"):format(#bad, #bad == 1 and "" or "s"))
+    for _, r in ipairs(bad) do
+        print(("%s |cffffd100%s|r: %s"):format(BAD, r.label, r.text or ""))
+        if r.fix then print("      |cff999999Fix: " .. r.fix .. "|r") end
     end
+    print("      |cff999999(/brat check lists every check, including the ones that pass.)|r")
 end

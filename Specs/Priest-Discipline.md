@@ -21,7 +21,8 @@ Entropic Rift damage up; Atonement transfer raised).
 | Purge the Wicked | +15% Holy damage (talent, doesn't replace SW:P per summary) | guide (PvP page) |
 | Ultimate Penitence | 4 min; mostly a damage gap-filler | guide |
 | Voidwraith | summoned when Entropic Rift expires | guide |
-| Season 2 tier 2pc | Penance +20%; each Penance cuts Mind Blast cd by 2s | guide → *learned* (set bonus varies) |
+| Season 2 tier 2pc | Penance +20%; each Penance cuts Mind Blast cd by 2s | Method, Conquest Capped 12.1.5 (all agree) → **modeled**, only while the active 2-piece names Penance (`BRAT.SetBonus`) |
+| Season 2 tier 4pc | After Mind Blast, next Power Word: Shield / Void Shield absorbs +25% | healing only: no rotation change |
 
 ## To confirm in game (tooltips)
 - Penance and Mind Blast cooldowns.
