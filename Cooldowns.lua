@@ -19,6 +19,7 @@ local RATE_DOWN = 0.5  -- learning speed when BRAT was too optimistic (same spee
 -- Telling a reduction from a reset: reductions are spread over the casts in
 -- between (Smite x8 -> Chastise 30s early = 3.75s per cast); a reset is one jump.
 local MAX_PER_CAST = 0.15 -- more than this share of the cooldown per cast in between = a reset/proc
+local STALE_PICK = 4   -- Blizzard picking a spell this soon after you cast it is a leftover, not "ready"
 local CONFIRMED = 3    -- Blizzard must have picked a spell this often before
                        -- "filler picked" counts as evidence it wasn't ready
 
@@ -54,7 +55,9 @@ local function redOf(x, y)
     end
     local k = known[y]
     if type(k) == "table" then
-        if k.talent and not BRAT.Knows(k.talent) then return 0 end
+        if not BRAT.RuleOn(k) then return 0 end -- talent / set bonus missing
+        -- Any formula of the enemy count (Evoker: Mass Disintegrate).
+        if k.fn then return k.fn((BRAT.Predict and BRAT.Predict.enemies) or 1) end
         -- Per enemy hit, capped (Evoker Causality: Pyre 0.4s per target, at most 2s).
         if k.perTarget then
             local t = (BRAT.Predict and BRAT.Predict.enemies) or 1
@@ -75,8 +78,13 @@ local pending = {}
 -- become Holy Fire when talented, and stay SW:P when not. (Mapping to the base
 -- alone wrongly turned Holy Fire into Shadow Word: Pain.)
 local keyCache = {}
+-- Replacements also change mid-fight (Evoker: Dragonrage becomes Unbound Flame
+-- when it ends, and back when its cooldown is up), so the cache only lives 1s.
+local keyCacheAt = 0
 local function key(id)
     if not id then return id end
+    local now = GetTime()
+    if now - keyCacheAt > 1 then wipe(keyCache); keyCacheAt = now end
     local k = keyCache[id]
     if k == nil then
         local base = BRAT.Safe(C_Spell.GetBaseSpell, id) or id
@@ -127,6 +135,14 @@ end
 function CD:Length(id)
     id = key(id)
     if noCooldown(id) then return nil end
+    -- A spec rule computed live (e.g. a tier set bonus shortens it) wins over
+    -- anything stored: a length read from the game (or its base cooldown,
+    -- which ignores set bonuses) goes stale when you change gear.
+    local known = rules().lengths[id]
+    if type(known) == "function" then
+        local v = known()
+        if v then return v end
+    end
     local i = BRAT.db.cds[id]
     if i and i.len then return i.len end
     local ms = BRAT.Safe(GetSpellBaseCooldown, id)
@@ -134,8 +150,7 @@ function CD:Length(id)
         info(id).len = ms / 1000
         return ms / 1000
     end
-    local known = rules().lengths[id]
-    if known then return known end
+    if type(known) == "number" then return known end
     local dot = dotDef(id)
     if dot then return dot[1] * (1 - PANDEMIC) end
     return nil
@@ -226,12 +241,14 @@ function CD:OnCast(raw)
             if hp and hp.q[1] then popFront(x, hp, now) end
         end
     end
-    -- This cast reduces every other spell's running cooldown.
+    -- This cast reduces every other spell's running cooldown. Spec rules may
+    -- count it as a variant (Evoker: a Disintegrate made Mass by an empower).
     local apo = now < apoUntil
+    local as = rules().castAs and rules().castAs(id) or id
     for x, p in pairs(pending) do
         if x ~= id then
             local mult = (apo and HOLY_WORDS[x]) and APOTHEOSIS_MULT or 1
-            p.counts[id] = (p.counts[id] or 0) + mult
+            p.counts[as] = (p.counts[as] or 0) + mult
         end
     end
     -- Casts that also apply a DoT (Shadow: Tentacle Slam applies Vampiric
@@ -272,15 +289,14 @@ function CD:OnPicked(id)
     local now = GetTime()
     if pending[id] then
         info(id).picks = (info(id).picks or 0) + 1
-        -- Spells whose reductions the spec rules fully describe: the timer is
-        -- trusted. Blizzard can briefly recommend a spell still on cooldown
-        -- (e.g. Fire Breath at the pull, right after the opener cast it), so a
-        -- pick only counts when the timer is nearly done anyway.
+        -- Blizzard keeps recommending a spell for a moment after you cast it
+        -- (Evoker empowers after release, Fire Breath right after the opener):
+        -- a pick that soon is stale, not proof. Later, Blizzard's pick is proof
+        -- even for spells with known reductions: the rules can miss some (Evoker:
+        -- Mass Disintegrate, tier set Causality), and a timer left running slow
+        -- held Fire Breath / Eternity Surge back by up to 11s.
         local p = pending[id]
-        if knownRed(id) and p.q[1] then
-            local len = CD:Length(id) or 0
-            if frontLeft(id, p, now) > math.max(2, len * 0.1) then return end
-        end
+        if knownRed(id) and p.castAt and now - p.castAt < STALE_PICK then return end
         proveReady(id, now)
     elseif self:Length(id) then
         info(id).picks = (info(id).picks or 0) + 1

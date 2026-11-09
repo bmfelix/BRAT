@@ -19,6 +19,7 @@ Status: **confirmed** (guide + in-game checks by Brad). Rules: `Data/SpecRules.l
 | Holy Fire | 10s cooldown; replaces Shadow Word: Pain | in game |
 | Apotheosis | Holy Word reduction +200% (3×); 20s, +12s with Eternal Sanctity; grants a Holy Word charge | Method 12.1.5; tooltip in game |
 | Burning Vehemence | Holy Fire cleaves | Method 12.1.5 |
+| Season 2 tier (Cosmic Penitent's Raiment) | 2pc: crit (or haste: sources disagree) per Renew target, up to 6%; 4pc: Renew healing +10%, Light's Resurgence always leaves a Renew | Method, Skill-Capped 12.1.5 — healing/stats only: **no damage-rotation change**, not modeled |
 
 ## Notes
 - Holy has no Shadow Word: Pain (Holy Fire replaces it).
