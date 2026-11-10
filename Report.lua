@@ -7,7 +7,7 @@
 --     follow-up, #1 = their single most common one)
 --   * NEXT misses, cooldown-estimate misses, procs, how often you pressed NOW.
 --   * Blizzard's priority per enemy count.
--- tools\Analyze-History.ps1 does the same on your PC and writes .log files.
+-- tools\analyze_history.py does the same on your PC and writes .log files.
 local _, BRAT = ...
 local Report = {}
 BRAT.Report = Report
