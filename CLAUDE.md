@@ -67,6 +67,8 @@ Open questions per spec are in each `Specs/*.md` "To confirm in game" section.
   double-click `BRAT Data Manager.cmd`). Each has `--help`. New spec: add it to `SPECS`.
 - The parse cache is JSON in `tools/cache/<Class>-<Spec>/` (converted from the old PowerShell
   XML cache on 2026-11-09; the Python export reproduced `Data/WCLRaw.lua` byte for byte).
-- Generated Lua files are written UTF-8, CRLF. `tools/wcl-creds.json` is tracked in git:
-  don't push the repo publicly as-is.
+- Generated Lua files are written UTF-8, CRLF.
+- The repo is **public** (github.com/bmfelix/BRAT, remote name `BRAT`). Never commit secrets:
+  `tools/wcl-creds.json` is gitignored (the old secret leaked in history and was rotated
+  2026-11-10).
 - Commit only when Brad asks.
