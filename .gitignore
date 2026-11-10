@@ -3,3 +3,5 @@ __pycache__/
 tools/logs/
 tools/cache/.fetch.lock
 tools/cache/**/*.tmp
+tools/wcl-creds.json
+tools/wcl-credentials.json
