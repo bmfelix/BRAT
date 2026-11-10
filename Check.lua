@@ -186,7 +186,7 @@ add("Your parses", function()
     local p = { logs = ps.raw.logs, blizzard = ps.raw.blizzard }
     local n = p.logs.n + p.blizzard.n
     if n == 0 then
-        return "warn", "none yet", "After a raid: upload logs, /reload, run tools\\Fetch-MyParses.ps1, /reload."
+        return "warn", "none yet", "After a raid: upload logs, /reload, run tools\\fetch_my_parses.py, /reload."
     end
     return "ok", ("%d with Warcraft Logs, %d with Learn from Blizzard"):format(p.logs.n, p.blizzard.n)
 end)

@@ -70,7 +70,7 @@ end
 
 ---------------------------------------------------------------------------
 -- Fights: one record per combat, stored as a compact string so the
--- tools\Fetch-MyParses.ps1 script can read it from SavedVariables.
+-- tools\fetch_my_parses.py script can read it from SavedVariables.
 ---------------------------------------------------------------------------
 local fight
 local encounter = { id = 0, diff = 0 }
@@ -85,7 +85,7 @@ Stats.ContextKey = contextKey
 
 local REGIONS = { "US", "KR", "EU", "TW", "CN" }
 
--- char/realm/region let tools\Fetch-MyParses.ps1 find your parses by itself.
+-- char/realm/region let tools\fetch_my_parses.py find your parses by itself.
 local function encode(f)
     return ("t=%d;spec=%d;src=%s;dps=%d;dur=%d;tg=%.1f;kind=%s;enc=%d;diff=%d;ab=%d;char=%s;realm=%s;region=%s"):format(
         f.t, f.spec, f.src, f.dps, f.dur, f.tg, f.kind, f.enc, f.diff, f.ab and 1 or 0,

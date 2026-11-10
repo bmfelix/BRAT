@@ -1,5 +1,5 @@
 -- BRAT history: a complete record of every fight, saved in BRATDB.history so
--- tools\Analyze-History.ps1 can study it on your PC and narrow the rotation down.
+-- tools\analyze_history.py can study it on your PC and narrow the rotation down.
 -- One string per event (compact, and easy to read outside the game):
 --   H1;F;serverTime;spec;char-realm;instance;instanceType;difficulty;mapID;keystoneLevel   fight start
 --   H1;N;t;encounterID;difficulty;bossName      boss pull

@@ -19,7 +19,7 @@ local DEFAULTS = {
     fights = {},            -- one encoded string per fight (Stats.lua)
     resetAt = {},           -- [specID] = server time of last comparison reset
     recordHistory = true,   -- keep a full record of every fight (History.lua)
-    history = {},           -- one string per event, read by tools\Analyze-History.ps1
+    history = {},           -- one string per event, read by tools\analyze_history.py
     spellNames = {},        -- [spellID] = name, so the analyzer can print names
     runs = {},              -- one summary per analysis run, for the trend (Report.lua)
     priority = {},          -- [specID][targets][spellID] = {w, g}: Blizzard's priority from the last analysis
@@ -537,7 +537,7 @@ SlashCmdList.BRAT = function(input)
             local fights, lines = BRAT.History:Count()
             say(("history: %d fights, %d events recorded (%s). /brat history on|off|clear"):format(
                 fights, lines, db.recordHistory and "recording" or "off"))
-            say("To analyze: /reload, then run tools\\Analyze-History.ps1 on your PC.")
+            say("To analyze: /reload, then run tools\\analyze_history.py on your PC.")
         end
     elseif cmd == "hide" or cmd == "unhide" then
         -- /brat hide [next]: never recommend the spell in NOW (or NEXT) again.
